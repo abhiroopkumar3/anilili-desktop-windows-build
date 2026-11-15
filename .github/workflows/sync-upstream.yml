@@ -2,7 +2,7 @@ name: Sync from upstream
 
 # Copies the latest code from the original repo (sanilili/desktoprepo1) into this repo's main branch.
 # Everything under .github/workflows is protected: it is never overwritten, deleted or added to by the sync.
-# README.md is also ours; upstream's own README is saved as UPSTREAM-README.md.
+# README.md is also ours and is never overwritten by the sync.
 # It runs weekly at 00:30 Austin time (America/Chicago, daylight saving handled by GitHub).
 # A build is started only when the version in src-tauri/tauri.conf.json has no release here yet.
 # "Force build" starts one regardless.
@@ -77,10 +77,8 @@ jobs:
             git checkout HEAD -- "$f"
           done
 
-          # README.md is ours. Keep upstream's README beside it as UPSTREAM-README.md.
-          git show FETCH_HEAD:README.md > UPSTREAM-README.md 2>/dev/null || true
+          # README.md is ours: put it back.
           git checkout HEAD -- README.md
-          git add UPSTREAM-README.md 2>/dev/null || true
 
           echo "$up_sha" > .upstream-sha
           git add .upstream-sha

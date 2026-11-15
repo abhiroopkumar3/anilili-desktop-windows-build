@@ -54,9 +54,9 @@ repo.
 ## About the app
 
 Anilili Desktop is a Tauri 3, Rust and React app. mpv paints the video under the interface. It
-browses and plays anime, with a library, downloads, subtitles and extra providers. The original
-project's feature list is in [`UPSTREAM-README.md`](UPSTREAM-README.md), and its layout and rules
-are in [AGENTS.md](AGENTS.md).
+browses and plays anime, with a library, downloads, subtitles and extra providers. The feature
+list is in the [original README](https://github.com/sanilili/desktoprepo1#readme), and the
+project layout and rules are in [AGENTS.md](AGENTS.md).
 
 ## Credits and license
 
