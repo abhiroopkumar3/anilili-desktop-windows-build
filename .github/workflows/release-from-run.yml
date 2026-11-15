@@ -1,0 +1,43 @@
+name: Publish release from a build run
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID of a successful 'Build Windows installer' run (the number in its URL)"
+        required: true
+        default: "43704657397"
+      tag:
+        description: "Tag to create for the release"
+        required: true
+        default: "v0.1.6"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the installer from that run
+        uses: actions/download-artifact@v4
+        with:
+          name: Anilili-Windows-Installer
+          path: installer
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          sha=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID" --jq .head_sha)
+          ls -la installer
+          gh release create "$TAG" installer/*.exe \
+            --repo "${{ github.repository }}" \
+            --target "$sha" \
+            --title "Anilili Desktop ${TAG#v} (Windows installer)" \
+            --notes "Unsigned Windows installer built by GitHub Actions run $RUN_ID from commit ${sha:0:7}. Windows SmartScreen may warn: click More info, then Run anyway."
