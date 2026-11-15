@@ -1,0 +1,99 @@
+name: Sync from upstream
+
+# Copies the latest code from the original repo (sanilili/desktoprepo1) into this repo's main branch.
+# Everything under .github/workflows is protected: it is never overwritten, deleted or added to by the sync.
+# If anything changed, it starts a build (which then publishes a release for that version).
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+    inputs:
+      build_after_sync:
+        description: "Start a build if the sync changed anything"
+        type: boolean
+        default: true
+      force_build:
+        description: "Start a build even if nothing changed"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_URL: https://github.com/sanilili/desktoprepo1.git
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Copy upstream code, keeping our workflows
+        id: sync
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Only the tip is needed, so a rewritten upstream history cannot cause merge conflicts.
+          git fetch --depth=1 "$UPSTREAM_URL" HEAD
+          up_sha=$(git rev-parse FETCH_HEAD)
+          up_msg=$(git log -1 --format=%s FETCH_HEAD)
+
+          if [ -f .upstream-sha ] && [ "$(cat .upstream-sha)" = "$up_sha" ]; then
+            echo "Already up to date with upstream ${up_sha:0:7}."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Remove files upstream deleted (never our workflows or the sync marker).
+          git ls-tree -r --name-only FETCH_HEAD | sort > /tmp/upstream-files.txt
+          git ls-files | sort > /tmp/our-files.txt
+          comm -13 /tmp/upstream-files.txt /tmp/our-files.txt \
+            | grep -v -E '^(\.github/workflows/|\.upstream-sha$)' \
+            | while IFS= read -r f; do git rm -q -f -- "$f"; done || true
+
+          # Bring in upstream's files.
+          git checkout FETCH_HEAD -- .
+
+          # Protect the workflows folder: put ours back, drop anything upstream tried to add there.
+          git ls-files .github/workflows | while IFS= read -r f; do
+            git cat-file -e "HEAD:$f" 2>/dev/null || git rm -q -f -- "$f"
+          done
+          git ls-tree -r --name-only HEAD .github/workflows | while IFS= read -r f; do
+            git checkout HEAD -- "$f"
+          done
+
+          echo "$up_sha" > .upstream-sha
+          git add .upstream-sha
+
+          if git diff --cached --quiet; then
+            echo "No file changes."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Safety net: the sync must never touch the workflows folder.
+          if git diff --cached --name-only | grep -q '^\.github/workflows/'; then
+            echo "Refusing to commit: the sync would change .github/workflows"
+            git diff --cached --name-only | grep '^\.github/workflows/'
+            exit 1
+          fi
+
+          git commit -q -m "Sync from upstream ${up_sha:0:7}: $up_msg"
+          git push origin HEAD:main
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "Synced to upstream ${up_sha:0:7}"
+
+      - name: Start a build
+        if: steps.sync.outputs.changed == 'true' && inputs.build_after_sync != false || inputs.force_build == true
+        run: gh workflow run build-windows.yml --repo "${{ github.repository }}" --ref main

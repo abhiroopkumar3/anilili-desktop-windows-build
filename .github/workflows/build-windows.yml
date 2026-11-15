@@ -1,7 +1,15 @@
 name: Build Windows installer
 
+# Builds the NSIS installer for whatever version is in src-tauri/tauri.conf.json and uploads it as the
+# "Anilili-Windows-Installer" artifact. Starts on demand, or automatically after "Sync from upstream".
+# A successful run triggers "Publish release from a build run", which tags and releases that version.
+
 on:
   workflow_dispatch:
+
+concurrency:
+  group: build-windows
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -42,29 +50,45 @@ jobs:
 
       - run: npm ci
 
-      # The libmpv release pinned in scripts/fetch-libmpv.mjs has been removed upstream (HTTP 404),
-      # so look up the newest LGPL x86_64 build and point the script at it for this run only.
-      - name: Point libmpv fetch at the newest upstream build
+      # libmpv comes from a third-party project that deletes old releases, which broke the repo's own
+      # pin. Order of preference: the repo's pin, then the exact build that produced a known-good
+      # installer, then the newest upstream LGPL build.
+      - name: Choose a libmpv build
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          KNOWN_GOOD_URL: https://github.com/zhongfly/mpv-winbuild/releases/download/2026-11-14-649001d4e2/mpv-dev-lgpl-x86_64-20261114-git-649001d4e2.7z
+          KNOWN_GOOD_SHA: 57a63259d51712ff517bbdb56cf7d78567d4d18d113ca58f1ac008901eef98d8
         run: |
-          url=$(gh api "repos/zhongfly/mpv-winbuild/releases?per_page=15" \
-            --jq '[.[].assets[] | select(.name | test("^mpv-dev-lgpl-x86_64-[0-9]{8}-git-[0-9a-f]+\\.7z$"))][0].browser_download_url')
-          if [ -z "$url" ] || [ "$url" = "null" ]; then
-            echo "No matching libmpv asset found. Recent assets:"
-            gh api "repos/zhongfly/mpv-winbuild/releases?per_page=3" --jq '.[].assets[].name'
-            exit 1
+          exists() { curl -fsSL -o /dev/null -r 0-0 "$1"; }
+          pinned=$(grep -o 'https://github.com/zhongfly/mpv-winbuild/releases/download/[^"]*\.7z' scripts/fetch-libmpv.mjs | head -1 || true)
+          if [ -n "$pinned" ] && exists "$pinned"; then
+            echo "Repo's pinned libmpv is still available; using it as is."
+            exit 0
+          fi
+          if exists "$KNOWN_GOOD_URL"; then
+            echo "Using the known-good libmpv build."
+            url="$KNOWN_GOOD_URL"; sha="$KNOWN_GOOD_SHA"
+          else
+            echo "Known-good build is gone; looking up the newest upstream LGPL build."
+            url=$(gh api "repos/zhongfly/mpv-winbuild/releases?per_page=15" \
+              --jq '[.[].assets[] | select(.name | test("^mpv-dev-lgpl-x86_64-[0-9]{8}-git-[0-9a-f]+\\.7z$"))][0].browser_download_url')
+            sha=""
+            if [ -z "$url" ] || [ "$url" = "null" ]; then
+              echo "No matching libmpv asset found. Recent assets:"
+              gh api "repos/zhongfly/mpv-winbuild/releases?per_page=3" --jq '.[].assets[].name'
+              exit 1
+            fi
           fi
           echo "Using $url"
-          ASSET_URL="$url" node -e '
+          NEW_URL="$url" NEW_SHA="$sha" node -e '
             const fs = require("fs");
             const f = "scripts/fetch-libmpv.mjs";
             let s = fs.readFileSync(f, "utf8");
             const before = s;
-            s = s.replace(/url: "https:\/\/github\.com\/zhongfly[^"]*"/, () => `url: "${process.env.ASSET_URL}"`);
-            s = s.replace(/sha256: "12a9966[0-9a-f]*"/, () => `sha256: ""`);
-            if (s === before) throw new Error("fetch-libmpv.mjs pin not found");
+            s = s.replace(/url: "https:\/\/github\.com\/zhongfly[^"]*"/, () => `url: "${process.env.NEW_URL}"`);
+            s = s.replace(/sha256: "[0-9a-f]{64}"(,\s*\n\s*dll:)/, (m, tail) => `sha256: "${process.env.NEW_SHA}"${tail}`);
+            if (s === before) throw new Error("libmpv pin not found in fetch-libmpv.mjs");
             fs.writeFileSync(f, s);
           '
 
@@ -97,8 +121,16 @@ jobs:
       - name: Build installer
         run: npx tauri build
 
+      - name: Record version
+        shell: bash
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          echo "Built Anilili $version" >> "$GITHUB_STEP_SUMMARY"
+          ls -la target/release/bundle/nsis/
+
       - uses: actions/upload-artifact@v4
         with:
           name: Anilili-Windows-Installer
           path: target/release/bundle/nsis/*.exe
           if-no-files-found: error
+          retention-days: 90

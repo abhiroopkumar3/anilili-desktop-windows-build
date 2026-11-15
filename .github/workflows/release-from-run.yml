@@ -1,16 +1,20 @@
 name: Publish release from a build run
 
+# Runs automatically after every successful "Build Windows installer" run, and can also be started
+# by hand for an older run. It tags the exact commit that run built as v<version> (the version in
+# src-tauri/tauri.conf.json) and attaches the installer to a GitHub release with that tag.
+# If the release already exists, only its installer is replaced.
+
 on:
+  workflow_run:
+    workflows: ["Build Windows installer"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       run_id:
         description: "ID of a successful 'Build Windows installer' run (the number in its URL)"
         required: true
         default: "43704657397"
-      tag:
-        description: "Tag to create for the release"
-        required: true
-        default: "v0.1.6"
 
 permissions:
   contents: write
@@ -18,26 +22,45 @@ permissions:
 
 jobs:
   release:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.run_id }}
     steps:
+      - name: Find the commit that run built
+        id: run
+        run: |
+          sha=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID" --jq .head_sha)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      # Check out that exact commit so the version we tag is the version that was built.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.run.outputs.sha }}
+
       - name: Download the installer from that run
         uses: actions/download-artifact@v4
         with:
           name: Anilili-Windows-Installer
           path: installer
-          run-id: ${{ inputs.run_id }}
+          run-id: ${{ env.RUN_ID }}
           github-token: ${{ github.token }}
 
-      - name: Create tag and release
+      - name: Create or update the release
         env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ inputs.run_id }}
-          TAG: ${{ inputs.tag }}
+          SHA: ${{ steps.run.outputs.sha }}
         run: |
-          sha=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID" --jq .head_sha)
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          tag="v$version"
           ls -la installer
-          gh release create "$TAG" installer/*.exe \
-            --repo "${{ github.repository }}" \
-            --target "$sha" \
-            --title "Anilili Desktop ${TAG#v} (Windows installer)" \
-            --notes "Unsigned Windows installer built by GitHub Actions run $RUN_ID from commit ${sha:0:7}. Windows SmartScreen may warn: click More info, then Run anyway."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; replacing its installer."
+            gh release upload "$tag" installer/*.exe --clobber
+          else
+            gh release create "$tag" installer/*.exe \
+              --target "$SHA" \
+              --title "Anilili Desktop $version (Windows installer)" \
+              --notes "Unsigned Windows installer for Anilili Desktop $version, built by GitHub Actions run $RUN_ID from commit ${SHA:0:7}. Windows SmartScreen may warn: click More info, then Run anyway."
+          fi
+          echo "Release $tag: https://github.com/${{ github.repository }}/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
