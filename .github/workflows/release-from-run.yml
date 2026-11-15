@@ -47,9 +47,13 @@ jobs:
           run-id: ${{ env.RUN_ID }}
           github-token: ${{ github.token }}
 
+      # Uses the repo secret RELEASE_TOKEN if you add one (a personal access token with Contents and
+      # Workflows write access); otherwise the built-in token. GitHub can refuse the built-in token
+      # when the tagged commit itself changed files under .github/workflows.
       - name: Create or update the release
         env:
           SHA: ${{ steps.run.outputs.sha }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: |
           version=$(node -p "require('./src-tauri/tauri.conf.json').version")
           tag="v$version"
