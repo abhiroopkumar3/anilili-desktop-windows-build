@@ -2,11 +2,14 @@ name: Sync from upstream
 
 # Copies the latest code from the original repo (sanilili/desktoprepo1) into this repo's main branch.
 # Everything under .github/workflows is protected: it is never overwritten, deleted or added to by the sync.
-# If anything changed, it starts a build (which then publishes a release for that version).
+# It runs weekly at 00:30 Austin time (America/Chicago, daylight saving handled by GitHub).
+# A build is started only when the version in src-tauri/tauri.conf.json has no release here yet.
+# "Force build" starts one regardless.
 
 on:
   schedule:
-    - cron: "17 9 * * *"
+    - cron: "30 0 * * 1"
+      timezone: "America/Chicago"
   workflow_dispatch:
     inputs:
       build_after_sync:
@@ -94,6 +97,28 @@ jobs:
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "Synced to upstream ${up_sha:0:7}"
 
+      - name: Check whether this version already has a release
+        id: version
+        shell: bash
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          tag="v$version"
+          if out=$(gh api "repos/${{ github.repository }}/releases/tags/$tag" 2>&1); then
+            echo "Release $tag already exists."
+            echo "need_build=false" >> "$GITHUB_OUTPUT"
+          elif echo "$out" | grep -q "Not Found"; then
+            echo "No release for $tag yet, a build is needed."
+            echo "need_build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Could not check releases: $out"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Version check"
+            echo "tauri.conf.json version: \`$version\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Start a build
-        if: steps.sync.outputs.changed == 'true' && inputs.build_after_sync != false || inputs.force_build == true
+        if: (steps.version.outputs.need_build == 'true' && inputs.build_after_sync != false) || inputs.force_build == true
         run: gh workflow run build-windows.yml --repo "${{ github.repository }}" --ref main
