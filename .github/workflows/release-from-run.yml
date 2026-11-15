@@ -1,14 +1,11 @@
 name: Publish release from a build run
 
-# Runs automatically after every successful "Build Windows installer" run, and can also be started
-# by hand for an older run. It tags the exact commit that run built as v<version> (the version in
+# Started automatically by the last step of every successful "Build Windows installer" run, and can
+# also be started by hand for an older run. It tags the exact commit that run built as v<version> (the version in
 # src-tauri/tauri.conf.json) and attaches the installer to a GitHub release with that tag.
 # If the release already exists, only its installer is replaced.
 
 on:
-  workflow_run:
-    workflows: ["Build Windows installer"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       run_id:
@@ -22,11 +19,10 @@ permissions:
 
 jobs:
   release:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.run_id }}
+      RUN_ID: ${{ inputs.run_id }}
     steps:
       - name: Find the commit that run built
         id: run

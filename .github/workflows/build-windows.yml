@@ -2,10 +2,14 @@ name: Build Windows installer
 
 # Builds the NSIS installer for whatever version is in src-tauri/tauri.conf.json and uploads it as the
 # "Anilili-Windows-Installer" artifact. Starts on demand, or automatically after "Sync from upstream".
-# A successful run triggers "Publish release from a build run", which tags and releases that version.
+# When it succeeds, its last step starts "Publish release from a build run" for this run.
 
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
 
 concurrency:
   group: build-windows
@@ -134,3 +138,11 @@ jobs:
           path: target/release/bundle/nsis/*.exe
           if-no-files-found: error
           retention-days: 90
+
+      # GitHub did not fire a workflow_run trigger for runs started by another workflow, so start the
+      # release workflow directly (the same way "Sync from upstream" starts this one).
+      - name: Start the release workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release-from-run.yml --repo "${{ github.repository }}" --ref main -f run_id="${{ github.run_id }}"
