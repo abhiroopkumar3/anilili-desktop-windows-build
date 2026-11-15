@@ -35,20 +35,57 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          cache-on-failure: true
           workspaces: |
             . -> target
             providers -> target
 
       - run: npm ci
 
+      # The libmpv release pinned in scripts/fetch-libmpv.mjs has been removed upstream (HTTP 404),
+      # so look up the newest LGPL x86_64 build and point the script at it for this run only.
+      - name: Point libmpv fetch at the newest upstream build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          url=$(gh api "repos/zhongfly/mpv-winbuild/releases?per_page=15" \
+            --jq '[.[].assets[] | select(.name | test("^mpv-dev-lgpl-x86_64-[0-9]{8}-git-[0-9a-f]+\\.7z$"))][0].browser_download_url')
+          if [ -z "$url" ] || [ "$url" = "null" ]; then
+            echo "No matching libmpv asset found. Recent assets:"
+            gh api "repos/zhongfly/mpv-winbuild/releases?per_page=3" --jq '.[].assets[].name'
+            exit 1
+          fi
+          echo "Using $url"
+          ASSET_URL="$url" node -e '
+            const fs = require("fs");
+            const f = "scripts/fetch-libmpv.mjs";
+            let s = fs.readFileSync(f, "utf8");
+            const before = s;
+            s = s.replace(/url: "https:\/\/github\.com\/zhongfly[^"]*"/, () => `url: "${process.env.ASSET_URL}"`);
+            s = s.replace(/sha256: "12a9966[0-9a-f]*"/, () => `sha256: ""`);
+            if (s === before) throw new Error("fetch-libmpv.mjs pin not found");
+            fs.writeFileSync(f, s);
+          '
+
       - name: Fetch vendored assets
+        shell: bash
         run: |
           node scripts/fetch-libmpv.mjs
           node scripts/fetch-shaders.mjs
-          node scripts/fetch-filters.mjs
+          # fetch-filters skips lists it already has, so retrying is safe (Node's fetch can hit a transient error).
+          for i in 1 2 3 4 5; do
+            node scripts/fetch-filters.mjs && break
+            echo "fetch-filters failed (attempt $i), retrying"
+            sleep 5
+            if [ "$i" = 5 ]; then exit 1; fi
+          done
           node scripts/prepare-boringssl.mjs
+          echo "--- vendor contents ---"
+          ls -la vendor/libmpv/win32-x64 vendor/filters vendor/shaders | head -60
 
       - name: Build WebAssembly providers
+        shell: bash
         run: node scripts/build-providers.mjs
 
       - name: Build installer
