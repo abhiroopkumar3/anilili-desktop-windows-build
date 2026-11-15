@@ -73,13 +73,19 @@ jobs:
         run: |
           node scripts/fetch-libmpv.mjs
           node scripts/fetch-shaders.mjs
-          # fetch-filters skips lists it already has, so retrying is safe (Node's fetch can hit a transient error).
-          for i in 1 2 3 4 5; do
-            node scripts/fetch-filters.mjs && break
-            echo "fetch-filters failed (attempt $i), retrying"
-            sleep 5
-            if [ "$i" = 5 ]; then exit 1; fi
-          done
+          # Node 22.23's built-in fetch crashes on these hosts (undici assertion), so download the
+          # filter lists with curl; fetch-filters.mjs then sees them and skips its own download.
+          mkdir -p vendor/filters
+          dl() {
+            curl -fsSL --retry 5 --retry-delay 3 -o "vendor/filters/$1" "$2"
+            head -c 2000 "vendor/filters/$1" | grep -q "! Title:" || { echo "$1 is not a filter list"; exit 1; }
+            echo "$1: $(wc -c < "vendor/filters/$1") bytes"
+          }
+          dl easylist.txt https://easylist.to/easylist/easylist.txt
+          dl easyprivacy.txt https://easylist.to/easylist/easyprivacy.txt
+          dl ublock-filters.txt https://ublockorigin.github.io/uAssets/filters/filters.txt
+          dl ublock-badware.txt https://ublockorigin.github.io/uAssets/filters/badware.txt
+          node scripts/fetch-filters.mjs
           node scripts/prepare-boringssl.mjs
           echo "--- vendor contents ---"
           ls -la vendor/libmpv/win32-x64 vendor/filters vendor/shaders | head -60
