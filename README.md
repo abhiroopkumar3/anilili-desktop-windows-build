@@ -1,5 +1,13 @@
 # Anilili Desktop: Windows build
 
+> **Status: archived, no longer maintained (November 2026).**
+> The original Anilili project was discontinued by its author. A community has continued it under
+> the new name **Anilife**, which has its own desktop app:
+> [anilifecommunity/kotlindesktop](https://github.com/anilifecommunity/kotlindesktop).
+> This fork is no longer updated, and its sync, build and release workflows are disabled. The last
+> installer built here (v0.1.6) stays available on the [Releases](../../releases) page, but it
+> will not receive fixes. For a current version, use Anilife instead.
+
 An unofficial fork that builds the Windows installer (.exe) of
 [Anilili Desktop](https://github.com/sanilili/desktoprepo1) with GitHub Actions, so nothing has to
 be installed on a PC to get it. It keeps itself in step with the original repo and publishes a
@@ -13,7 +21,9 @@ latest release.
 The installer is **not code-signed**, so Windows SmartScreen may warn you the first time. Choose
 "More info", then "Run anyway", if you trust the source.
 
-## How it works
+## How it worked
+
+This describes the setup as it ran until it was switched off.
 
 Three workflows in `.github/workflows` run in a chain:
 
